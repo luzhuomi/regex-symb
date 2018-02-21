@@ -71,6 +71,30 @@ mergeByVars ms =
   in nonConsts' ++ consts
 
 -- ^ apply arden's law                        
+-- ^ arden's law is only applicable iff
+--  1. X = c1...cn X + A
+--  where no non-terminal appears in ci. and eps \not in ci
+
 arden :: Eqn -> Maybe Eqn 
-arden e = Just e 
+arden e = 
+  let var = lhs e
+      mb_r = findMatched var (rhs e)
+  in case mb_r of 
+    { Nothing -> Nothing
+    ; Just (r, monomials) -> 
+      let monomials = map (\m -> case m of 
+                              { Const r' -> Const (Seq [Star r,r']) 
+                              ; NonConst r' y -> NonConst (Seq [Star r,r']) y 
+                              }) monomials
+      in Just $ e{rhs=monomials}
+    }
+    where findMatched var monomials =  -- return the matched monomial (the prefix) and the other non matching monomials
+            let (matched,others) = span (\m -> case m of 
+                                            { Const r' -> False
+                                            ; NonConst r' y -> y == var  } ) monomials
+            in case matched of 
+              { [ NonConst r' y ] -> Just (r', others)
+              ; _ -> Nothing
+              }
+
 
