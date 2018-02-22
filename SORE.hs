@@ -1,6 +1,8 @@
 module SORE where
 
 import qualified Data.Map as M
+import Data.Maybe (isNothing, isJust)
+import Data.List (partition)
 
 data RE = Phi 
         | Eps          -- ^ an empty exp
@@ -8,12 +10,12 @@ data RE = Phi
         | Choice [RE]  -- ^ a choice exp 'r1 + r2'
         | Seq [RE]     -- ^ a pair exp '(r1,r2)'
         | Star RE      -- ^ a kleene's star exp 'r*'
-          deriving Show
+          deriving (Show, Eq)
 
 -- ^ Monomial is a term which is either form r.x or a constant r
 data Monomial = NonConst RE Var
               | Const RE
-          deriving Show
+          deriving (Show, Eq)
                          
 -- ^ variables
 type Var = String
@@ -22,7 +24,7 @@ type Var = String
 data Eqn = Eqn { lhs::Var
                , rhs::[Monomial]
                }
-         deriving Show
+         deriving (Show,Eq)
                     
 
 
@@ -37,6 +39,13 @@ toSubst (Eqn lhs rhs) | any (\m -> isFree lhs m) rhs = Nothing
 isFree :: Var -> Monomial -> Bool
 isFree var (Const _) = False
 isFree var (NonConst _ var') = var == var'
+
+-- ^ check whether an equation is self-recursive
+isSelfRecursive :: Eqn -> Bool
+isSelfRecursive e = 
+  let var = lhs e
+      monos = rhs e
+  in any (isFree var) monos
 
 substE :: Eqn -> Substition -> Eqn
 substE e s = if (lhs e) `M.member` s  
@@ -59,14 +68,14 @@ substM (NonConst r v) s =
 -- ^ merge non constant monomials based on common vars    e.g. r.x + ... + t.x --> (r+t).x
 mergeByVars :: [Monomial] -> [Monomial]
 mergeByVars ms = 
-  let (consts, nonConsts) = span (\m -> case m of { Const _ -> True
-                                                  ; _ -> False 
-                                                  }) ms
+  let (consts, nonConsts) = partition (\m -> case m of { Const _ -> True
+                                                       ; _ -> False 
+                                                       }) ms
       table = foldl (\t m@(NonConst r v) -> 
                       case M.lookup v t of 
                         { Nothing  -> M.insert v [r] t
                         ; Just rs -> M.update (\x -> Just (rs ++ [r])) v t
-                        }) M.empty ms
+                        }) M.empty nonConsts
       nonConsts' = map (\(v,rs) -> NonConst (Choice rs) v) (M.toList table)
   in nonConsts' ++ consts
 
@@ -82,16 +91,16 @@ arden e =
   in case mb_r of 
     { Nothing -> Nothing
     ; Just (r, monomials) -> 
-      let monomials = map (\m -> case m of 
+      let monomials' = map (\m -> case m of 
                               { Const r' -> Const (Seq [Star r,r']) 
                               ; NonConst r' y -> NonConst (Seq [Star r,r']) y 
                               }) monomials
-      in Just $ e{rhs=monomials}
+      in Just $ e{rhs=monomials'}
     }
     where findMatched var monomials =  -- return the matched monomial (the prefix) and the other non matching monomials
-            let (matched,others) = span (\m -> case m of 
-                                            { Const r' -> False
-                                            ; NonConst r' y -> y == var  } ) monomials
+            let (matched,others) = partition (\m -> case m of 
+                                                 { Const r' -> False
+                                                 ; NonConst r' y -> y == var  } ) monomials
             in case matched of 
               { [ NonConst r' y ] -> Just (r', others)
               ; _ -> Nothing
@@ -104,6 +113,58 @@ solve es =
   in if es' == es 
      then es
      else go es'
-       where go es = 
-               let mb_ardened = map arden es
-               in if all 
+       where 
+         go :: [Eqn] -> [Eqn]
+         go es = 
+           let mb_ardened = map arden es
+           in if all isNothing mb_ardened 
+              then 
+                -- pick one non-self recursive eqn to build a substitution and apply it
+                case filter (not . isSelfRecursive) es of 
+                  (e:_)  -> case toSubst e of 
+                    { Nothing -> error "this should not happen, unless the self recursive check is wrong."
+                    ; Just s ->  -- apply the subs to the rest of the euqations.
+                      let es' = filter (\e' -> not (lhs e' == lhs e)) es
+                      in map (\e' -> substE e' s) es'
+                    }
+              else 
+                -- some has been reduced via arden's law
+                -- replace the old one with the new one
+                map (\(mb_e', e) -> case mb_e' of 
+                        Nothing -> e
+                        Just e' -> e' 
+                    ) $ zip mb_ardened es
+
+-- ^ some combinators to build equation easily
+(.=.) :: Var -> [Monomial] -> Eqn
+(.=.) var monos = Eqn var monos
+
+
+(...) :: RE -> Var -> Monomial 
+(...) r var = NonConst r var
+
+co :: RE -> Monomial
+co r = Const r
+
+
+example1 :: [Eqn]
+example1 = 
+  [ "R1" .=. [ L 'x' ... "R1" 
+             , L 'y' ... "R2"
+             , L 'z' ... "R3"
+             , co Eps
+             ]
+  , "R2" .=. [ L 'x' ... "R1" 
+             , L 'y' ... "R2"
+             , L 'z' ... "R3"
+             , co Eps
+             ]
+  , "R3" .=. [ L 'x' ... "R1" 
+             , L 'y' ... "R2"
+             , L 'z' ... "R3"
+             , co Eps
+             ]
+  ]
+  
+  
+  
