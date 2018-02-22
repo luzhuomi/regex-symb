@@ -98,3 +98,12 @@ arden e =
               }
 
 
+solve :: [Eqn] -> [Eqn]
+solve es = 
+  let es' = go es
+  in if es' == es 
+     then es
+     else go es'
+       where go es = 
+               let mb_ardened = map arden es
+               in if all 
