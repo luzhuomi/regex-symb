@@ -10,7 +10,7 @@ data RE = Phi
         | Choice [RE]  -- ^ a choice exp 'r1 + r2'
         | Seq [RE]     -- ^ a pair exp '(r1,r2)'
         | Star RE      -- ^ a kleene's star exp 'r*'
-          deriving (Show, Eq)
+          deriving ({-Show,-} Eq)
 
 -- ^ Monomial is a term which is either form r.x or a constant r
 data Monomial = NonConst RE Var
@@ -27,6 +27,18 @@ data Eqn = Eqn { lhs::Var
          deriving (Show,Eq)
                     
 
+instance Show RE where
+  show Phi = "{}"
+  show Eps = "Eps"
+  show (L c) = show c
+  show (Choice rs) = "(" ++ concat (interleave (map show rs) "+") ++  ")" 
+  show (Seq rs) = "(" ++ concat (interleave (map show rs) ".")  ++ ")"
+  show (Star r) = show r ++ "*" 
+
+
+interleave [] b = []
+interleave [a] b = [a]
+interleave (a:as) b = a:b:(interleave as b)
 
 -- ^ substitution, substitute the the rhs of an equation into another
 type Substition = M.Map Var [Monomial]
@@ -109,31 +121,36 @@ arden e =
 
 solve :: [Eqn] -> [Eqn]
 solve es = 
-  let es' = go es
+  let es' = solve1 es
   in if es' == es 
      then es
-     else go es'
-       where 
-         go :: [Eqn] -> [Eqn]
-         go es = 
-           let mb_ardened = map arden es
-           in if all isNothing mb_ardened 
-              then 
-                -- pick one non-self recursive eqn to build a substitution and apply it
-                case filter (not . isSelfRecursive) es of 
-                  (e:_)  -> case toSubst e of 
-                    { Nothing -> error "this should not happen, unless the self recursive check is wrong."
-                    ; Just s ->  -- apply the subs to the rest of the euqations.
-                      let es' = filter (\e' -> not (lhs e' == lhs e)) es
-                      in map (\e' -> substE e' s) es'
-                    }
-              else 
-                -- some has been reduced via arden's law
-                -- replace the old one with the new one
-                map (\(mb_e', e) -> case mb_e' of 
-                        Nothing -> e
-                        Just e' -> e' 
-                    ) $ zip mb_ardened es
+     else solve es'
+
+solve1 :: [Eqn] -> [Eqn]
+solve1 [] = []
+solve1 [e] = case arden e of 
+  { Nothing -> [e]
+  ; Just e' -> [e']
+  }
+solve1 es = 
+  let mb_ardened = map arden es
+  in if all isNothing mb_ardened 
+     then 
+       -- pick one non-self recursive eqn to build a substitution and apply it
+       case filter (not . isSelfRecursive) es of 
+         (e:_)  -> case toSubst e of 
+           { Nothing -> error "this should not happen, unless the self recursive check is wrong."
+           ; Just s ->  -- apply the subs to the rest of the euqations.
+             let es' = filter (\e' -> not (lhs e' == lhs e)) es
+             in map (\e' -> substE e' s) es'
+           }
+     else 
+       -- some has been reduced via arden's law
+       -- replace the old one with the new one
+       map (\(mb_e', e) -> case mb_e' of 
+               Nothing -> e
+               Just e' -> e' 
+           ) $ zip mb_ardened es
 
 -- ^ some combinators to build equation easily
 (.=.) :: Var -> [Monomial] -> Eqn
@@ -149,6 +166,21 @@ co r = Const r
 
 example1 :: [Eqn]
 example1 = 
+  [ "R1" .=. [ L 'a' ... "R2"
+             , L 'b' ... "R3"
+             , co Eps
+             ]
+  , "R2" .=. [ L 'b' ... "R1"
+             , L 'c' ... "R3"
+             ]
+  , "R3" .=. [ L 'a' ... "R1"
+             , L 'c' ... "R2"
+             ]
+  ]
+
+
+example2 :: [Eqn]
+example2 = 
   [ "R1" .=. [ L 'x' ... "R1" 
              , L 'y' ... "R2"
              , L 'z' ... "R3"
