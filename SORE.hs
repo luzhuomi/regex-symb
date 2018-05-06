@@ -2,7 +2,7 @@ module SORE where
 
 import qualified Data.Map as M
 import Data.Maybe (isNothing, isJust)
-import Data.List (partition)
+import Data.List (partition, sortBy)
 
 data RE = Phi 
         | Eps          -- ^ an empty exp
@@ -143,6 +143,7 @@ solve es = case solve1 es M.empty of
   { (_, subst) -> subst }
                 
 
+-- ^ just solve by variable declaration order
 solve1 :: [Eqn] -> Substitution -> ([Eqn], Substitution)
 solve1 [] subst = ([],subst)
 solve1 (e:es) subst = 
@@ -151,8 +152,104 @@ solve1 (e:es) subst =
       subst' = compose s' subst
   in solve1 es' subst'
 
+solve' :: [Eqn] -> Substitution
+solve' es = case solve2 es M.empty of 
+  { (_, subst) -> subst }
 
 
+-- ^ solve by an order of DM weight function
+solve2 :: [Eqn] -> Substitution -> ([Eqn], Substitution)
+solve2 [] subst = ([],subst)
+solve2 [e] subst = solve1 [e] subst
+solve2 es subst = 
+  let esWeighted       = map (\e -> (e, weight es (lhs e))) es
+      esWeightedSorted = sortBy (\(e1,w1) (e2,w2) -> compare w1 w2) esWeighted
+      esSorted         = map fst esWeightedSorted
+  in case esSorted of 
+    { (e:es') -> 
+         let s' = arden e
+             es'' = map (\e -> substE e s') es'
+             subst' = compose s' subst
+         in solve2 es'' subst'
+    ; _ -> error "not possible"
+    }
+
+
+-- DM heuristic
+-- ^ inr(Eqn,var) = { r | var' = A \in Eqn,  A = r . var + A' for some A', var != var' } 
+
+inr :: [Eqn] -> Var -> [RE]
+inr es var = concatMap (\e -> 
+                         let var' = lhs e
+                             monomials = rhs e
+                         in if (var' == var) 
+                            then [] 
+                            else concatMap (\mon -> case mon of
+                                               { Const r -> []
+                                               ; NonConst r var'' | var'' == var -> [r]
+                                                                  | otherwise    -> []
+                                               }) monomials
+                       ) es
+
+
+-- ^ outr(Eqn,var) = { r_1 , ... , r_m } where var = r_1 . var_1 + ... + r_{m-1} . var_{m-1} + r_m + r . var \in Eqn
+outr :: [Eqn] -> Var -> [RE]
+outr es var = concatMap (\e -> 
+                          let var' = lhs e 
+                              monomials = rhs e
+                          in if (var' == var)
+                             then concatMap (\m -> case m of 
+                                                { NonConst r var'' | var'' == var -> []
+                                                                   | otherwise -> [r]
+                                                ; Const r -> [r] }) monomials
+                             else []
+                        ) es
+
+
+-- ^ loopr(Eqn,var) = r where  var = r_1 . var_1 + ... + r_{m-1} . var_{m-1} + r_m + r . var \in Eqn
+loopr :: [Eqn] -> Var -> Maybe RE 
+loopr es var = 
+  let rs = concatMap (\e -> 
+                       let var' = lhs e 
+                           monomials = rhs e
+                       in if (var' == var)
+                          then concatMap (\m -> case m of 
+                                             { NonConst r var'' | var'' == var -> [r]
+                                                                | otherwise -> []
+                                             ; Const r -> [] }) monomials
+                          else []
+                     ) es
+  in case rs of { r:_ -> Just r 
+                ; _   -> Nothing }
+
+-- ^ alphabetical width of a given regular expression     
+alphaWidth :: RE -> Int
+alphaWidth Phi = 0
+alphaWidth Eps = 0
+alphaWidth (L _) = 1
+alphaWidth (Choice rs) = sum (map alphaWidth rs)
+alphaWidth (Seq rs) = sum (map alphaWidth rs)
+alphaWidth (Star r) = alphaWidth r
+
+
+-- ^ the weight function of DM heuristic
+-- let m = | inr(eqn, var) | 
+--     l = | outr(eqn, var) |
+--     r0 = | loopr(eqn, var) |  in case there is no loop, we set r0 = phi
+--     weight(var) = (m-1) * \Sigma_{r \in outr(Eqn,var)} |r| +
+--                   (l-1) * \sigma_{r \in inr(Eqn,var)} |r| + 
+--                   (m * l - 1) * |r0|                     
+weight :: [Eqn] -> Var -> Int
+weight es var = 
+  let inrs = inr es var
+      outrs = outr es var
+      m = length inrs
+      l = length outrs
+      r0 = case loopr es var of 
+        { Just r -> r 
+        ; Nothing -> Phi }
+  in (m-1)*(sum (map alphaWidth outrs)) + (l-1)*(sum (map alphaWidth inrs)) + (m * l - 1) * (alphaWidth r0)
+      
 
 
 {-
