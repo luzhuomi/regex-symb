@@ -26,6 +26,7 @@ def main():
     num_samples = int(args[3])
     g = rndfa.ICDFArnd(num_states,num_symbols)
     count = 0
+    test_cases = []
     while count < num_samples:
         d = g.next()
         if len(d.Final) == 0:
@@ -34,12 +35,13 @@ def main():
             count = count+1
             eqns = []
             for st in d.States:
-                monomials = [ { 'r': l, 'R': d.Delta(st,l)} for l in d.Sigma if d.Delta(st,l) is not None ]
+                monomials = [ { 're': l, 'var': d.Delta(st,l)} for l in d.Sigma if d.Delta(st,l) is not None ]
                 if st in d.Final:
-                    monomials.append({ 'r': 'eps'})
-                eqn = { 'R':st, 'monomials' : monomials }
+                    monomials.append({ 're': 'eps'})
+                eqn = { 'lhs':st, 'rhs' : monomials }
                 eqns.append(eqn)
-            print json.dumps(eqns)
+            test_cases.append(eqns)
+    print json.dumps(test_cases)
     return 0
 
 if __name__ == "__main__":

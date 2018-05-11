@@ -1,8 +1,16 @@
+{-# LANGUAGE OverloadedStrings #-} 
+
 module Text.Regex.Symbolic.Solver where
 
+import Control.Monad 
+import Control.Applicative hiding (Const)
 import qualified Data.Map as M
 import Data.Maybe (isNothing, isJust)
 import Data.List (partition, sortBy)
+import Data.Char
+import qualified Data.Text as T
+import Data.Aeson
+import qualified Data.ByteString.Lazy.Char8 as B
 
 data RE = Phi 
         | Eps          -- ^ an empty exp
@@ -17,8 +25,9 @@ data Monomial = NonConst RE Var
               | Const RE
           deriving (Show, Eq)
                          
+                   
 -- ^ variables
-type Var = String
+type Var = Int
 
 -- ^ an equation is a variable (i.e. LHS) and a sum of all monomials (i.e. RHS)
 data Eqn = Eqn { lhs::Var
@@ -39,6 +48,41 @@ instance Show RE where
 interleave [] b = []
 interleave [a] b = [a]
 interleave (a:as) b = a:b:(interleave as b)
+
+
+
+instance FromJSON Eqn where
+ parseJSON = withObject "eqn" $ \o -> do 
+   { lhs <- o .: "lhs"
+   ; rhs <- o .: "rhs"
+   ; return (Eqn lhs rhs)
+   }
+
+instance FromJSON Monomial where
+  parseJSON = withObject "monomial" $ \o -> do 
+    { re <- o .: "re"
+    ; var <- o .: "var"
+    ; return (NonConst re var)
+    } <|> do
+    { re <- o .: "re"
+    ; return (Const re)
+    }
+                                        
+instance FromJSON RE where                                        
+  parseJSON = withText "re" $ \x -> 
+    let s = T.unpack x
+    in if s == "eps"
+       then return Eps
+       else let i = read s :: Int
+                ch = chr i
+            in return (L ch)
+               
+
+        
+      
+             
+      
+
 
 -- ^ substitution, substitute the the rhs of an equation into another
 type Substitution = M.Map Var [Monomial]
@@ -90,6 +134,18 @@ substM (NonConst r v) s =
                  ; NonConst t u -> NonConst (Seq [r,t]) u
                  }) ms
     }
+  
+normE :: Eqn -> Eqn
+normE e = 
+  let rhs' = mergeByVars (rhs e)
+  in e{rhs=rhs'}
+     
+-- ^ normalize equation set 
+-- we only need it for the first time reading from file.     
+-- subsequent steps are handle by substE function.
+norm :: [Eqn] -> [Eqn]     
+norm es = map normE es
+     
 -- ^ merge non constant monomials based on common vars    e.g. r.x + ... + t.x --> (r+t).x
 mergeByVars :: [Monomial] -> [Monomial]
 mergeByVars ms = 
@@ -324,40 +380,73 @@ co r = Const r
 
 example1 :: [Eqn]
 example1 = 
-  [ "R2" .=. [ L 'b' ... "R1"
-             , L 'c' ... "R3"
-             ]
-  , "R1" .=. [ L 'a' ... "R2"
-             , L 'b' ... "R3"
-             , co Eps
-             ]
-  , "R3" .=. [ L 'a' ... "R1"
-             , L 'c' ... "R2"
-             ]
+  [ 2 .=. [ L 'b' ... 1
+          , L 'c' ... 3
+          ]
+  , 1 .=. [ L 'a' ... 2
+          , L 'b' ... 3
+          , co Eps
+          ]
+  , 3 .=. [ L 'a' ... 1
+          , L 'c' ... 2
+          ]
   ]
 
 
 example2 :: [Eqn]
 example2 = 
-  [ "R1" .=. [ L 'x' ... "R1" 
-             , L 'y' ... "R2"
-             , L 'z' ... "R3"
-             , co Eps
+  [ 1 .=. [ L 'x' ... 1
+          , L 'y' ... 2
+          , L 'z' ... 3
+          , co Eps
+          ]
+  , 2 .=. [ L 'x' ... 1 
+          , L 'y' ... 2
+          , L 'z' ... 3
+          , co Eps
              ]
-  , "R2" .=. [ L 'x' ... "R1" 
-             , L 'y' ... "R2"
-             , L 'z' ... "R3"
-             , co Eps
-             ]
-  , "R3" .=. [ L 'x' ... "R1" 
-             , L 'y' ... "R2"
-             , L 'z' ... "R3"
-             , co Eps
-             ]
+  , 3 .=. [ L 'x' ... 1 
+          , L 'y' ... 2
+          , L 'z' ... 3
+          , co Eps
+          ]
   ]
   
   
 example3 :: [Eqn]
 example3 = 
-  [ "R" .=. [ L 'x' ... "R", co Eps] 
+  [ 1 .=. [ L 'x' ... 1, co Eps] 
   ]
+  
+  
+
+
+{-  
+build example from this counter example.
+
+[{"rhs":[{"var":0,"re":"1"},{"var":1,"re":"0"},{"var":0,"re":"2"}],"lhs":0}
+,{"rhs":[{"var":0,"re":"1"},{"var":0,"re":"0"},{"var":2,"re":"2"},{"re":"eps"}],"lhs":1}
+,{"rhs":[{"var":0,"re":"1"},{"var":1,"re":"0"},{"var":2,"re":"2"},{"re":"eps"}],"lhs":2}
+]
+-}
+
+example4 :: [Eqn]
+example4 =             
+  [ 0 .=. [ L 'y' ... 0 
+          , L 'x' ... 1
+          , L 'z' ... 0
+          ]
+  , 1 .=. [ L 'y' ... 0
+          , L 'x' ... 0
+          , L 'z' ... 2
+          , co Eps
+          ]
+  , 2 .=. [ L 'x' ... 0
+          , L 'x' ... 1
+          , L 'z' ... 2
+          , co Eps
+          ]
+  ]
+    
+-- normalization required  
+    
