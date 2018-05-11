@@ -1,5 +1,6 @@
 
 import Text.Regex.Symbolic.Solver as S
+import System.Environment
 import Data.Aeson
 import qualified Data.ByteString.Lazy.Char8 as B
 import qualified Data.Map as M
@@ -7,7 +8,8 @@ import qualified Data.Map as M
 
 main :: IO ()
 main = do 
-  txt <- B.readFile "./test_cases.json"
+  args <- getArgs
+  txt <- B.readFile (head args)
   case (eitherDecode txt :: Either String [[Eqn]]) of
     { Left err -> print err
     ; Right test_cases  -> do 
