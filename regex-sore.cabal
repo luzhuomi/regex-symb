@@ -1,0 +1,26 @@
+Name:                   regex-sore
+Version:                0.0.1
+License:                BSD3
+License-File:           LICENSE
+Copyright:              Copyright (c) 2010-2018, Kenny Zhuo Ming Lu and Martin Sulzmann
+Author:                 Kenny Zhuo Ming Lu and Martin Sulzmann
+Maintainer:             luzhuomi@gmail.com, martin.sulzmann@gmail.com
+Stability:              Beta
+Homepage:               
+Synopsis:               Replaces/Enhances Text.Regex. Implementing regular expression matching using Brzozowski's Deriviatives
+Description:            Symbolic operation for regular expression equation and language 
+Category:               Text
+Tested-With:            GHC
+Build-Type:             Simple
+Cabal-Version:          >= 1.2.3
+
+flag base4
+
+library 
+  Build-Depends:        regex-base >= 0.93.1,  mtl, containers, bytestring
+  Build-Depends:         base >= 4.0 && < 5.0, ghc-prim
+  Exposed-Modules:       Text.Regex.Symbolic.Solver
+  Buildable:              True
+  Extensions:             GADTs, MultiParamTypeClasses, FunctionalDependencies, FlexibleInstances, TypeSynonymInstances, FlexibleContexts
+  GHC-Options:            -O2 -funbox-strict-fields
+  -- GHC-Prof-Options:       -auto-all
