@@ -8,7 +8,9 @@ import Control.Monad
 import Control.Applicative hiding (Const)
 import qualified Data.Text as T
 import Data.Char
-
+-- import Control.Monad.Par.IO
+-- import Control.Monad.Trans (liftIO, MonadIO)
+import Control.Monad.Par
 instance FromJSON Eqn where
  parseJSON = withObject "eqn" $ \o -> do 
    { lhs <- o .: T.pack "lhs"
@@ -43,19 +45,38 @@ main = do
   txt <- B.readFile (head args)
   case (eitherDecode txt :: Either String [[Eqn]]) of
     { Left err -> print err
-    ; Right test_cases  -> do 
-      mapM_ (\test_case -> 
-              let normalized = norm test_case
-                  subst = solve  normalized
-                  subst' = solve' normalized
-                  subst'' = solve'' normalized                  
-              in case (M.lookup 0 subst, M.lookup 0 subst'') of 
-                { (Just ms, Just ms') -> 
-                     let width = sum $ map (\(Const r) -> alphaWidth r) ms
-                         width' = sum $ map (\(Const r) -> alphaWidth r) ms'
-                     in putStrLn $ show width ++ "," ++ show width'
-                ; (_,_) -> print "no init state"
-                ; 
-                }
-            ) test_cases
+    ; Right test_cases  -> {- do 
+       mapM_ (\test_case -> 
+                 runParIO (liftIO $ 
+                              let normalized = norm test_case
+                                  subst = solve  normalized
+                                  subst' = solve' normalized
+                                  subst'' = solve'' normalized
+                              in case (M.lookup 0 subst, M.lookup 0 subst'') of 
+                                { (Just ms, Just ms') -> 
+                                  let width = sum $ map (\(Const r) -> alphaWidth r) ms
+                                      width' = sum $ map (\(Const r) -> alphaWidth r) ms'
+                                  in putStrLn $ show width ++ "," ++ show width'
+                                ; (_,_) -> print "no init state"
+                                })
+                                 
+             ) test_cases
+       -}
+        let results :: [Maybe (Int,Int)]
+            results = runPar $ parMap (\test_case ->
+                                            let normalized = norm test_case
+                                                subst = solve  normalized
+                                                subst' = solve' normalized
+                                                subst'' = solve'' normalized
+                                            in case (M.lookup 0 subst, M.lookup 0 subst'') of
+                                                 { (Just ms, Just ms') -> 
+                                                   let width = sum $ map (\(Const r) -> alphaWidth r) ms
+                                                       width' = sum $ map (\(Const r) -> alphaWidth r) ms'
+                                                   in Just (width,width')
+                                                 ; (_,_) -> Nothing
+                                                 }) test_cases
+        in mapM_ (\result -> case result of { Just (w,y) -> putStrLn (show w ++ "," ++  show y)
+                                            ; Nothing -> return ()
+                                            }) results
+                                                 
     }
