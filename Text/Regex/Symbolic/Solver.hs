@@ -7,10 +7,14 @@ import Control.Applicative hiding (Const)
 import qualified Data.Map as M
 import Data.Maybe (isNothing, isJust)
 import Data.List (partition, sortBy)
-import Data.Char
-import qualified Data.Text as T
-import Data.Aeson
-import qualified Data.ByteString.Lazy.Char8 as B
+-- import Data.Char
+-- import qualified Data.Text as T
+-- import Data.Aeson
+-- import qualified Data.ByteString.Lazy.Char8 as B
+import Data.Graph.Inductive.Graph 
+import Data.Graph.Inductive.PatriciaTree
+import Data.Graph.Analysis.Algorithms.Common (uniqueCycles, uniqueCycles')
+
 
 data RE = Phi 
         | Eps          -- ^ an empty exp
@@ -51,32 +55,6 @@ interleave (a:as) b = a:b:(interleave as b)
 
 
 
-instance FromJSON Eqn where
- parseJSON = withObject "eqn" $ \o -> do 
-   { lhs <- o .: "lhs"
-   ; rhs <- o .: "rhs"
-   ; return (Eqn lhs rhs)
-   }
-
-instance FromJSON Monomial where
-  parseJSON = withObject "monomial" $ \o -> do 
-    { re <- o .: "re"
-    ; var <- o .: "var"
-    ; return (NonConst re var)
-    } <|> do
-    { re <- o .: "re"
-    ; return (Const re)
-    }
-                                        
-instance FromJSON RE where                                        
-  parseJSON = withText "re" $ \x -> 
-    let s = T.unpack x
-    in if s == "eps"
-       then return Eps
-       else let i = read s :: Int
-                ch = chr i
-            in return (L ch)
-               
 
         
       
@@ -208,12 +186,14 @@ solve1 (e:es) subst =
       subst' = compose s' subst
   in solve1 es' subst'
 
+
+
+-- ^ solve by an order of DM weight function
 solve' :: [Eqn] -> Substitution
 solve' es = case solve2 es M.empty of 
   { (_, subst) -> subst }
 
 
--- ^ solve by an order of DM weight function
 solve2 :: [Eqn] -> Substitution -> ([Eqn], Substitution)
 solve2 [] subst = ([],subst)
 solve2 [e] subst = solve1 [e] subst
@@ -306,6 +286,54 @@ weight es var =
         ; Nothing -> Phi }
   in (m-1)*(sum (map alphaWidth outrs)) + (l-1)*(sum (map alphaWidth inrs)) + (m * l - 1) * (alphaWidth r0)
       
+
+-- cycle counting heurstics
+
+
+solve'' :: [Eqn] -> Substitution
+solve'' es = case solve3 es M.empty of 
+  { (_, subst) -> subst }
+
+
+-- ^ solve by an order of cycle count
+solve3 :: [Eqn] -> Substitution -> ([Eqn], Substitution)
+solve3 [] subst = ([],subst)
+solve3 [e] subst = solve1 [e] subst
+solve3 es subst = 
+  let ccycles          = cycles es
+      esWeighted       = map (\e -> (e, ccount ccycles (lhs e))) es
+      esWeightedSorted = sortBy (\(e1,w1) (e2,w2) -> compare w1 w2) esWeighted
+      esSorted         = map fst esWeightedSorted
+  in case esSorted of 
+    { (e:es') -> 
+         let s' = arden e
+             es'' = map (\e -> substE e s') es'
+             subst' = compose s' subst
+         in solve3 es'' subst'
+    ; _ -> error "not possible"
+    }
+
+
+
+toGraph :: [Eqn] -> Gr () ()
+toGraph es = 
+  let verts = map (\e -> (lhs e, ())) es -- unlabled vertices
+      edges = concatMap (\e -> 
+                          let src = lhs e
+                          in concatMap (\mon -> case mon of 
+                                           { Const _ -> [] 
+                                           ; NonConst r var' -> [(src, var', ())] -- unlabeled edge
+                                           }) (rhs e)
+                          ) es 
+  in mkGraph verts edges
+
+cycles :: [Eqn] -> [[Var]]
+cycles es = 
+  let gr = toGraph es
+  in uniqueCycles' gr
+     
+ccount :: [[Var]] -> Var -> Int     
+ccount cycles var = length (filter (\cycle -> var `elem` cycle) cycles)
 
 
 {-

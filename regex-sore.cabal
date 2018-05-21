@@ -17,7 +17,8 @@ Cabal-Version:          >= 1.2.3
 flag base4
 
 library 
-  Build-Depends:         mtl, containers, bytestring, base, ghc-prim, aeson, text
+  Build-Depends:         mtl, containers, base, ghc-prim
+  Build-Depends:         fgl >= 5.5.0 && < 5.6.0,  Graphalyze
   Exposed-Modules:       Text.Regex.Symbolic.Solver
   Buildable:             True
   Extensions:            GADTs, MultiParamTypeClasses, FunctionalDependencies, FlexibleInstances, TypeSynonymInstances, FlexibleContexts
